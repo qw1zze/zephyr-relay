@@ -23,10 +23,10 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	authSvc := auth.New(ctx, cfg, log)
-	sessionStore := relay.NewSessionStore()
+	sessionStore := relay.NewSessionStore(log)
 	pendingStore := pending.NewStore()
 	relaySvc := relay.New(cfg, sessionStore, pendingStore, log)
-	h := handler.New(cfg, authSvc, relaySvc, pendingStore, log)
+	h := handler.New(cfg, authSvc, relaySvc, sessionStore, pendingStore, log)
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
 	})
