@@ -20,7 +20,9 @@ import (
 func main() {
 	cfg := config.Load()
 	log := logger.New()
-	authSvc := auth.New(cfg, log)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	authSvc := auth.New(ctx, cfg, log)
 	sessionStore := relay.NewSessionStore()
 	pendingStore := pending.NewStore()
 	relaySvc := relay.New(cfg, sessionStore, pendingStore, log)
@@ -51,9 +53,9 @@ func main() {
 	}()
 	<-quit
 	log.Info("shutdown signal received")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := app.ShutdownWithContext(ctx); err != nil {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := app.ShutdownWithContext(shutdownCtx); err != nil {
 		log.Error("graceful shutdown error", "err", err)
 	}
 	log.Info("server stopped")
