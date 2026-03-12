@@ -17,6 +17,8 @@ const (
 	TypeDeliver MessageType = "deliver"
 	TypeAck MessageType = "ack"
 	TypeServerAck MessageType = "server_ack"
+	TypePing MessageType = "ping"
+	TypePong MessageType = "pong"
 )
 
 type Message struct {

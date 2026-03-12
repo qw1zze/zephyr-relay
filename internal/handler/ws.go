@@ -70,7 +70,44 @@ func (h *Handler) HandleWS(c *websocket.Conn) {
 		return
 	}
 
-	h.log.Info("client authenticated", "remote_addr", remoteAddr, "address", payload.Address)
+	address := payload.Address
+	h.log.Info("client authenticated", "remote_addr", remoteAddr, "address", address)
+
+	session := relay.NewSession(address, c)
+	h.sessions.Add(address, session)
+	defer h.sessions.Delete(address)
+
+	go session.WriteLoop(h.log)
+
+	pongTimeout := time.Duration(h.cfg.PongTimeout) * time.Second
+
+	c.SetPingHandler(func(data string) error {
+		_ = c.SetReadDeadline(time.Now().Add(pongTimeout))
+		return c.WriteControl(websocket.PongMessage, []byte(data), time.Now().Add(time.Second))
+	})
+
+	c.SetPongHandler(func(_ string) error {
+		h.log.Debug("pong received", "address", address)
+		_ = c.SetReadDeadline(time.Now().Add(pongTimeout))
+		return nil
+	})
+
+	pingInterval := time.Duration(h.cfg.PingInterval) * time.Second
+	go func() {
+		ticker := time.NewTicker(pingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				ping, _ := json.Marshal(relay.Message{Type: relay.TypePing})
+				if err := session.SendMessage(ping); err != nil {
+					return
+				}
+			case <-session.Done:
+				return
+			}
+		}
+	}()
 
 	for {
 		_, msg, err := c.ReadMessage()
