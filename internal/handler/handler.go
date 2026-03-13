@@ -14,6 +14,7 @@ type Handler struct {
 	relay    *relay.Relay
 	sessions *relay.SessionStore
 	pending  *pending.Store
+	router   *relay.Router
 	log      *slog.Logger
 }
 
@@ -23,6 +24,7 @@ func New(
 	relay *relay.Relay,
 	sessions *relay.SessionStore,
 	pending *pending.Store,
+	router *relay.Router,
 	log *slog.Logger,
 ) *Handler {
 	return &Handler{
@@ -31,6 +33,7 @@ func New(
 		relay:    relay,
 		sessions: sessions,
 		pending:  pending,
+		router:   router,
 		log:      log,
 	}
 }

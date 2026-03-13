@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/gofiber/contrib/websocket"
@@ -79,6 +81,9 @@ func (h *Handler) HandleWS(c *websocket.Conn) {
 
 	go session.WriteLoop(h.log)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	pongTimeout := time.Duration(h.cfg.PongTimeout) * time.Second
 
 	c.SetPingHandler(func(data string) error {
@@ -109,13 +114,41 @@ func (h *Handler) HandleWS(c *websocket.Conn) {
 		}
 	}()
 
+	items, _ := h.pending.GetAll(address)
+	for _, item := range items {
+		if err := wsSendJSON(session, relay.TypeDeliver, item.Envelope); err != nil {
+			h.log.Warn("failed to deliver pending envelope",
+				"address", address, "message_id", item.Envelope.MessageID, "err", err)
+		}
+	}
+	_ = h.pending.DeleteAll(address)
+
 	for {
-		_, msg, err := c.ReadMessage()
+		_, data, err := c.ReadMessage()
 		if err != nil {
 			break
 		}
-		_ = msg
+		var msg relay.Message
+		if err := json.Unmarshal(data, &msg); err != nil {
+			h.log.Error("invalid message", "address", address, "error", err)
+			continue
+		}
+		if err := h.router.Route(ctx, session, msg); err != nil {
+			h.log.Error("route error", "address", address, "error", err)
+		}
 	}
+}
+
+func wsSendJSON(session *relay.Session, msgType relay.MessageType, payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal payload: %w", err)
+	}
+	msg, err := json.Marshal(relay.Message{Type: msgType, Payload: data})
+	if err != nil {
+		return fmt.Errorf("marshal message: %w", err)
+	}
+	return session.SendMessage(msg)
 }
 
 func marshalPayload(v any) json.RawMessage {
