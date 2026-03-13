@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
 	"zephyr-relay/internal/auth"
@@ -20,13 +21,21 @@ import (
 func main() {
 	cfg := config.Load()
 	log := logger.New()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	authSvc := auth.New(ctx, cfg, log)
 	sessionStore := relay.NewSessionStore(log)
-	pendingStore := pending.NewStore()
+
+	pendingTTL := time.Duration(cfg.PendingTTLDays) * 24 * time.Hour
+	pendingStore := pending.NewStore(ctx, pendingTTL)
+
 	relaySvc := relay.New(cfg, sessionStore, pendingStore, log)
-	h := handler.New(cfg, authSvc, relaySvc, sessionStore, pendingStore, log)
+	router := relay.NewRouter(sessionStore, pendingStore, log)
+
+	h := handler.New(cfg, authSvc, relaySvc, sessionStore, pendingStore, router, log)
+
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
 	})
@@ -41,8 +50,10 @@ func main() {
 	app.Get("/ws", websocket.New(h.HandleWS))
 	app.Get("/healthz", h.Health)
 	app.Get("/readyz", h.Ready)
+
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
 	go func() {
 		addr := ":" + cfg.ServerPort
 		log.Info("server starting", "addr", addr)
@@ -51,8 +62,10 @@ func main() {
 			os.Exit(1)
 		}
 	}()
+
 	<-quit
 	log.Info("shutdown signal received")
+
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 	if err := app.ShutdownWithContext(shutdownCtx); err != nil {
