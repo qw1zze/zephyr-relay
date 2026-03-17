@@ -17,6 +17,8 @@ const (
 	TypeDeliver MessageType = "deliver"
 	TypeAck MessageType = "ack"
 	TypeServerAck MessageType = "server_ack"
+	TypePing MessageType = "ping"
+	TypePong MessageType = "pong"
 )
 
 type Message struct {
@@ -31,7 +33,6 @@ type Envelope struct {
 	RecipientAddr string `json:"recipient_addr"`
 	CID           string `json:"cid"`
 	Timestamp     int64  `json:"timestamp"`
-	Signature     string `json:"signature"`
 }
 
 type ChallengePayload struct {
