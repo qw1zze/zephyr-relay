@@ -33,7 +33,6 @@ type Envelope struct {
 	RecipientAddr string `json:"recipient_addr"`
 	CID           string `json:"cid"`
 	Timestamp     int64  `json:"timestamp"`
-	Signature     string `json:"signature"`
 }
 
 type ChallengePayload struct {

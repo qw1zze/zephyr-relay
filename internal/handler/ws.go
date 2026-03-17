@@ -115,10 +115,15 @@ func (h *Handler) HandleWS(c *websocket.Conn) {
 	}()
 
 	items, _ := h.pending.GetAll(address)
+	if len(items) > 0 {
+		h.log.Info("flushing pending messages", "address", address, "count", len(items))
+	}
 	for _, item := range items {
 		if err := wsSendJSON(session, relay.TypeDeliver, item.Envelope); err != nil {
 			h.log.Warn("failed to deliver pending envelope",
 				"address", address, "message_id", item.Envelope.MessageID, "err", err)
+		} else {
+			h.log.Info("pending message delivered", "address", address, "message_id", item.Envelope.MessageID)
 		}
 	}
 	_ = h.pending.DeleteAll(address)
@@ -133,8 +138,9 @@ func (h *Handler) HandleWS(c *websocket.Conn) {
 			h.log.Error("invalid message", "address", address, "error", err)
 			continue
 		}
+		h.log.Debug("message received", "address", address, "type", msg.Type)
 		if err := h.router.Route(ctx, session, msg); err != nil {
-			h.log.Error("route error", "address", address, "error", err)
+			h.log.Error("route error", "address", address, "type", msg.Type, "error", err)
 		}
 	}
 }

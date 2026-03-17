@@ -47,6 +47,14 @@ func (r *Router) handleSend(_ context.Context, sender *Session, payload json.Raw
 		return fmt.Errorf("router: send: %w", err)
 	}
 
+	r.logger.Info("router: message received",
+		"message_id", env.MessageID,
+		"chat_id", env.ChatID,
+		"from", env.SenderAddr,
+		"to", env.RecipientAddr,
+		"cid", env.CID,
+	)
+
 	r.msgSenders.Store(env.MessageID, env.SenderAddr)
 
 	if recipientSession, online := r.sessions.Get(env.RecipientAddr); online {
@@ -54,6 +62,10 @@ func (r *Router) handleSend(_ context.Context, sender *Session, payload json.Raw
 			r.logger.Warn("router: send: direct delivery failed, saving as pending",
 				"message_id", env.MessageID, "err", err)
 		} else {
+			r.logger.Info("router: message delivered directly",
+				"message_id", env.MessageID,
+				"to", env.RecipientAddr,
+			)
 			return sendJSON(sender, TypeServerAck, ServerAckPayload{
 				MessageID: env.MessageID,
 				Status:    "delivered",
@@ -65,13 +77,18 @@ func (r *Router) handleSend(_ context.Context, sender *Session, payload json.Raw
 		return fmt.Errorf("router: send: save pending: %w", err)
 	}
 
+	r.logger.Info("router: message queued as pending",
+		"message_id", env.MessageID,
+		"to", env.RecipientAddr,
+	)
+
 	return sendJSON(sender, TypeServerAck, ServerAckPayload{
 		MessageID: env.MessageID,
 		Status:    "pending",
 	})
 }
 
-func (r *Router) handleAck(_ context.Context, _ *Session, payload json.RawMessage) error {
+func (r *Router) handleAck(_ context.Context, recipient *Session, payload json.RawMessage) error {
 	var ack AckPayload
 	if err := json.Unmarshal(payload, &ack); err != nil {
 		return fmt.Errorf("router: ack: unmarshal: %w", err)
@@ -80,6 +97,11 @@ func (r *Router) handleAck(_ context.Context, _ *Session, payload json.RawMessag
 	if ack.MessageID == "" {
 		return fmt.Errorf("router: ack: message_id is empty")
 	}
+
+	r.logger.Info("router: ack received",
+		"message_id", ack.MessageID,
+		"from", recipient.Address,
+	)
 
 	val, ok := r.msgSenders.Load(ack.MessageID)
 	if !ok {
@@ -123,9 +145,6 @@ func validateEnvelope(sender *Session, env Envelope) error {
 	}
 	if !strings.EqualFold(env.SenderAddr, sender.Address) {
 		return fmt.Errorf("sender_addr mismatch")
-	}
-	if env.Signature == "" {
-		return fmt.Errorf("signature is empty")
 	}
 	return nil
 }

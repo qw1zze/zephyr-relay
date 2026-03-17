@@ -105,7 +105,6 @@ func validEnvelope(senderAddr, recipientAddr, msgID string) relay.Envelope {
 		RecipientAddr: recipientAddr,
 		CID:           "QmTestCID1234567890",
 		Timestamp:     1234567890,
-		Signature:     "0xsig",
 	}
 }
 
