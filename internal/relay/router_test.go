@@ -95,6 +95,7 @@ func marshalAck(t *testing.T, msgID string) json.RawMessage {
 const (
 	aliceAddr = "0x1111111111111111111111111111111111111111"
 	bobAddr   = "0x2222222222222222222222222222222222222222"
+	carolAddr = "0x3333333333333333333333333333333333333333"
 )
 
 func validEnvelope(senderAddr, recipientAddr, msgID string) relay.Envelope {
@@ -253,6 +254,100 @@ func TestHandleAck_SenderOffline(t *testing.T) {
 	ackMsg := relay.Message{Type: relay.TypeAck, Payload: marshalAck(t, "msgB")}
 	err := router.Route(context.Background(), recipient, ackMsg)
 	require.NoError(t, err)
+}
+
+func groupEnvelope(senderAddr string, recipientAddrs []string, msgID string) relay.Envelope {
+	return relay.Envelope{
+		MessageID:      msgID,
+		ChatID:         "group-chat-1",
+		SenderAddr:     senderAddr,
+		RecipientAddrs: recipientAddrs,
+		CID:            "QmGroupCID1234567890",
+		Timestamp:      1234567890,
+	}
+}
+
+func TestHandleSend_GroupAllOnline(t *testing.T) {
+	store := relay.NewSessionStore(slog.Default())
+	ps := newMockPendingStore()
+	router := newRouter(store, ps)
+
+	sender := newTestSession(aliceAddr)
+	bob := newTestSession(bobAddr)
+	carol := newTestSession(carolAddr)
+	store.Add(aliceAddr, sender)
+	store.Add(bobAddr, bob)
+	store.Add(carolAddr, carol)
+
+	env := groupEnvelope(aliceAddr, []string{bobAddr, carolAddr}, "grp1")
+	msg := relay.Message{Type: relay.TypeSend, Payload: marshalEnvelope(t, env)}
+
+	err := router.Route(context.Background(), sender, msg)
+	require.NoError(t, err)
+
+	bobMsg := readMsg(t, bob)
+	assert.Equal(t, relay.TypeDeliver, bobMsg.Type)
+
+	carolMsg := readMsg(t, carol)
+	assert.Equal(t, relay.TypeDeliver, carolMsg.Type)
+
+	ack := readServerAck(t, sender)
+	assert.Equal(t, "grp1", ack.MessageID)
+	assert.Equal(t, "delivered", ack.Status)
+
+	assert.Empty(t, ps.saved(bobAddr))
+	assert.Empty(t, ps.saved(carolAddr))
+}
+
+func TestHandleSend_GroupAllOffline(t *testing.T) {
+	store := relay.NewSessionStore(slog.Default())
+	ps := newMockPendingStore()
+	router := newRouter(store, ps)
+
+	sender := newTestSession(aliceAddr)
+	store.Add(aliceAddr, sender)
+
+	env := groupEnvelope(aliceAddr, []string{bobAddr, carolAddr}, "grp2")
+	msg := relay.Message{Type: relay.TypeSend, Payload: marshalEnvelope(t, env)}
+
+	err := router.Route(context.Background(), sender, msg)
+	require.NoError(t, err)
+
+	assert.Len(t, ps.saved(bobAddr), 1)
+	assert.Equal(t, bobAddr, ps.saved(bobAddr)[0].Envelope.RecipientAddr)
+	assert.Len(t, ps.saved(carolAddr), 1)
+	assert.Equal(t, carolAddr, ps.saved(carolAddr)[0].Envelope.RecipientAddr)
+
+	ack := readServerAck(t, sender)
+	assert.Equal(t, "grp2", ack.MessageID)
+	assert.Equal(t, "pending", ack.Status)
+}
+
+func TestHandleSend_GroupPartialOnline(t *testing.T) {
+	store := relay.NewSessionStore(slog.Default())
+	ps := newMockPendingStore()
+	router := newRouter(store, ps)
+
+	sender := newTestSession(aliceAddr)
+	bob := newTestSession(bobAddr)
+	store.Add(aliceAddr, sender)
+	store.Add(bobAddr, bob)
+
+	env := groupEnvelope(aliceAddr, []string{bobAddr, carolAddr}, "grp3")
+	msg := relay.Message{Type: relay.TypeSend, Payload: marshalEnvelope(t, env)}
+
+	err := router.Route(context.Background(), sender, msg)
+	require.NoError(t, err)
+
+	bobMsg := readMsg(t, bob)
+	assert.Equal(t, relay.TypeDeliver, bobMsg.Type)
+
+	assert.Empty(t, ps.saved(bobAddr))
+	assert.Len(t, ps.saved(carolAddr), 1)
+
+	ack := readServerAck(t, sender)
+	assert.Equal(t, "grp3", ack.MessageID)
+	assert.Equal(t, "partial", ack.Status)
 }
 
 func TestHandleAck_UnknownMessageID(t *testing.T) {

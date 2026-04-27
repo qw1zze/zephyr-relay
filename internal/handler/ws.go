@@ -124,6 +124,7 @@ func (h *Handler) HandleWS(c *websocket.Conn) {
 				"address", address, "message_id", item.Envelope.MessageID, "err", err)
 		} else {
 			h.log.Info("pending message delivered", "address", address, "message_id", item.Envelope.MessageID)
+			h.router.RegisterSender(item.Envelope.MessageID, item.Envelope.SenderAddr)
 		}
 	}
 	_ = h.pending.DeleteAll(address)
