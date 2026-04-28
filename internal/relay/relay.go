@@ -27,12 +27,13 @@ type Message struct {
 }
 
 type Envelope struct {
-	MessageID     string `json:"message_id"`
-	ChatID        string `json:"chat_id"`
-	SenderAddr    string `json:"sender_addr"`
+	MessageID string `json:"message_id"`
+	ChatID string `json:"chat_id"`
+	SenderAddr string `json:"sender_addr"`
 	RecipientAddr string `json:"recipient_addr"`
-	CID           string `json:"cid"`
-	Timestamp     int64  `json:"timestamp"`
+	RecipientAddrs []string `json:"recipient_addrs,omitempty"`
+	CID string `json:"cid"`
+	Timestamp int64 `json:"timestamp"`
 }
 
 type ChallengePayload struct {

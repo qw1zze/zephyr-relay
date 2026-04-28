@@ -24,6 +24,10 @@ func NewRouter(sessions *SessionStore, pending PendingStore, logger *slog.Logger
 	}
 }
 
+func (r *Router) RegisterSender(messageID, senderAddr string) {
+	r.msgSenders.Store(messageID, senderAddr)
+}
+
 func (r *Router) Route(ctx context.Context, sender *Session, msg Message) error {
 	switch msg.Type {
 	case TypeSend:
@@ -47,44 +51,54 @@ func (r *Router) handleSend(_ context.Context, sender *Session, payload json.Raw
 		return fmt.Errorf("router: send: %w", err)
 	}
 
+	recipients := resolveRecipients(env)
+
 	r.logger.Info("router: message received",
 		"message_id", env.MessageID,
 		"chat_id", env.ChatID,
 		"from", env.SenderAddr,
-		"to", env.RecipientAddr,
+		"to", recipients,
 		"cid", env.CID,
 	)
 
 	r.msgSenders.Store(env.MessageID, env.SenderAddr)
 
-	if recipientSession, online := r.sessions.Get(env.RecipientAddr); online {
-		if err := sendJSON(recipientSession, TypeDeliver, env); err != nil {
-			r.logger.Warn("router: send: direct delivery failed, saving as pending",
-				"message_id", env.MessageID, "err", err)
+	var delivered, queued int
+	for _, recipientAddr := range recipients {
+		if recipientSession, online := r.sessions.Get(recipientAddr); online {
+			if err := sendJSON(recipientSession, TypeDeliver, env); err != nil {
+				r.logger.Warn("router: send: direct delivery failed, saving as pending",
+					"message_id", env.MessageID, "recipient", recipientAddr, "err", err)
+			} else {
+				r.logger.Info("router: message delivered directly",
+					"message_id", env.MessageID, "to", recipientAddr)
+				delivered++
+				continue
+			}
+		}
+
+		pendingEnv := env
+		pendingEnv.RecipientAddr = recipientAddr
+		if err := r.pending.Save(pendingEnv); err != nil {
+			r.logger.Warn("router: send: save pending failed",
+				"message_id", env.MessageID, "recipient", recipientAddr, "err", err)
 		} else {
-			r.logger.Info("router: message delivered directly",
-				"message_id", env.MessageID,
-				"to", env.RecipientAddr,
-			)
-			return sendJSON(sender, TypeServerAck, ServerAckPayload{
-				MessageID: env.MessageID,
-				Status:    "delivered",
-			})
+			r.logger.Info("router: message queued as pending",
+				"message_id", env.MessageID, "to", recipientAddr)
+			queued++
 		}
 	}
 
-	if err := r.pending.Save(env); err != nil {
-		return fmt.Errorf("router: send: save pending: %w", err)
+	status := "delivered"
+	if delivered == 0 {
+		status = "pending"
+	} else if queued > 0 {
+		status = "partial"
 	}
-
-	r.logger.Info("router: message queued as pending",
-		"message_id", env.MessageID,
-		"to", env.RecipientAddr,
-	)
 
 	return sendJSON(sender, TypeServerAck, ServerAckPayload{
 		MessageID: env.MessageID,
-		Status:    "pending",
+		Status:    status,
 	})
 }
 
@@ -127,6 +141,16 @@ func (r *Router) handleAck(_ context.Context, recipient *Session, payload json.R
 	return nil
 }
 
+func resolveRecipients(env Envelope) []string {
+	if len(env.RecipientAddrs) > 0 {
+		return env.RecipientAddrs
+	}
+	if env.RecipientAddr != "" {
+		return []string{env.RecipientAddr}
+	}
+	return nil
+}
+
 func validateEnvelope(sender *Session, env Envelope) error {
 	if env.MessageID == "" {
 		return fmt.Errorf("message_id is empty")
@@ -134,8 +158,14 @@ func validateEnvelope(sender *Session, env Envelope) error {
 	if env.ChatID == "" {
 		return fmt.Errorf("chat_id is empty")
 	}
-	if env.RecipientAddr == "" || !isValidEthAddress(env.RecipientAddr) {
+	recipients := resolveRecipients(env)
+	if len(recipients) == 0 {
 		return fmt.Errorf("recipient_addr is invalid")
+	}
+	for _, addr := range recipients {
+		if !isValidEthAddress(addr) {
+			return fmt.Errorf("recipient_addr is invalid: %s", addr)
+		}
 	}
 	if env.CID == "" {
 		return fmt.Errorf("cid is empty")
