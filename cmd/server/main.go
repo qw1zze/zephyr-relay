@@ -13,6 +13,7 @@ import (
 	"zephyr-relay/internal/config"
 	"zephyr-relay/internal/handler"
 	"zephyr-relay/internal/middleware"
+	"zephyr-relay/internal/moderation"
 	"zephyr-relay/internal/pending"
 	"zephyr-relay/internal/relay"
 	"zephyr-relay/pkg/logger"
@@ -33,8 +34,9 @@ func main() {
 
 	relaySvc := relay.New(cfg, sessionStore, pendingStore, log)
 	router := relay.NewRouter(sessionStore, pendingStore, log)
+	blocklist := moderation.NewBlockList()
 
-	h := handler.New(cfg, authSvc, relaySvc, sessionStore, pendingStore, router, log)
+	h := handler.New(cfg, authSvc, relaySvc, sessionStore, pendingStore, router, blocklist, log)
 
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
@@ -50,6 +52,11 @@ func main() {
 	app.Get("/ws", websocket.New(h.HandleWS))
 	app.Get("/healthz", h.Health)
 	app.Get("/readyz", h.Ready)
+
+	admin := app.Group("/admin", handler.AdminLocalOnly())
+	admin.Get("/blocked", h.ListBlocked)
+	admin.Post("/blocked", h.BlockAddress)
+	admin.Delete("/blocked/:address", h.UnblockAddress)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

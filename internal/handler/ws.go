@@ -75,6 +75,13 @@ func (h *Handler) HandleWS(c *websocket.Conn) {
 	address := payload.Address
 	h.log.Info("client authenticated", "remote_addr", remoteAddr, "address", address)
 
+	if h.blocklist.IsBlocked(address) {
+		h.log.Warn("blocked address rejected", "remote_addr", remoteAddr, "address", address)
+		writeError(c, "access denied")
+		_ = c.Close()
+		return
+	}
+
 	session := relay.NewSession(address, c)
 	h.sessions.Add(address, session)
 	defer h.sessions.Delete(address)
